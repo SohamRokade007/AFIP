@@ -41,17 +41,75 @@ jobs:
       - name: Install Chromium for Playwright
         run: python -m playwright install --with-deps chromium
 
+      - name: Record scrape start time
+        run: echo "SCRAPE_STARTED_AT=$(date '+%Y-%m-%d %H:%M:%S')" >> "$GITHUB_ENV"
+
       - name: Collect airfare observations
+        id: scrape
         run: python src/run_basket_scrape.py
 
-      - name: Commit updated observations
+      - name: Validate newly collected fares
+        id: validate
+        run: |
+          python - <<'PY'
+          import os
+          import sys
+          import pandas as pd
+
+          path = "data/processed/live_scraped_quotes_real.csv"
+          if not os.path.exists(path):
+              print("Scraper did not create its expected CSV file.")
+              sys.exit(1)
+
+          df = pd.read_csv(path)
+          df["scrape_timestamp"] = pd.to_datetime(df["scrape_timestamp"], errors="coerce")
+          started_at = pd.to_datetime(os.environ["SCRAPE_STARTED_AT"])
+          run_rows = df[df["scrape_timestamp"] >= started_at].copy()
+
+          if run_rows.empty:
+              print("No rows were written by this scraper run.")
+              sys.exit(1)
+
+          print("Rows written by this run:", len(run_rows))
+          print("Status breakdown:")
+          print(run_rows["status"].value_counts(dropna=False).to_string())
+
+          run_rows["parsed_fare_inr"] = pd.to_numeric(
+              run_rows["parsed_fare_inr"], errors="coerce"
+          )
+          successful = run_rows[
+              run_rows["status"].eq("ok")
+              & run_rows["parsed_fare_inr"].notna()
+              & (run_rows["parsed_fare_inr"] > 0)
+          ]
+
+          print("New successful fare observations:", len(successful))
+          if successful.empty:
+              print(
+                  "ERROR: The scraper completed but collected zero valid fares. "
+                  "Inspect the uploaded ixigo-scraper-debug artifact."
+              )
+              sys.exit(1)
+          PY
+
+      - name: Commit updated observations and diagnostics
+        if: always() && steps.scrape.outcome == 'success'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/processed/live_scraped_quotes_real.csv
           if git diff --cached --quiet; then
-            echo "No successful observation changes to commit."
+            echo "No observation changes to commit."
           else
             git commit -m "Update scraped airfare observations [skip ci]"
             git push
           fi
+
+      - name: Upload scraper debug bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ixigo-scraper-debug-${{ github.run_id }}
+          path: debug_output/
+          if-no-files-found: warn
+          retention-days: 7
