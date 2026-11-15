@@ -1,0 +1,8 @@
+pandas
+numpy
+statsmodels
+holidays
+openpyxl
+matplotlib
+playwright
+certifi
