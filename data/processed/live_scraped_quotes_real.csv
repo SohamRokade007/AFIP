@@ -74,3 +74,28 @@ scrape_timestamp,source_platform,origin,destination,sector,departure_date,carrie
 2026-09-25 18:05:25,ixigo,DEL,CCU,DEL-CCU,2026-11-09,,"₹7,376",7376.0,ok,,45
 2026-09-25 18:05:25,ixigo,DEL,CCU,DEL-CCU,2026-11-09,,"₹7,376",7376.0,ok,,45
 2026-09-25 18:05:25,ixigo,DEL,CCU,DEL-CCU,2026-11-09,,"₹8,362",8362.0,ok,,45
+2026-11-15 22:12:02,ixigo,DEL,BOM,DEL-BOM,2026-11-16,,,,date_picker_failed,departureDate field not found on page,1
+2026-11-15 22:12:12,ixigo,DEL,BOM,DEL-BOM,2026-11-22,,,,date_picker_failed,departureDate field not found on page,7
+2026-11-15 22:12:21,ixigo,DEL,BOM,DEL-BOM,2026-11-30,,,,date_picker_failed,departureDate field not found on page,15
+2026-11-15 22:12:30,ixigo,DEL,BOM,DEL-BOM,2026-12-15,,,,date_picker_failed,departureDate field not found on page,30
+2026-11-15 22:12:39,ixigo,DEL,BOM,DEL-BOM,2026-12-30,,,,date_picker_failed,departureDate field not found on page,45
+2026-11-15 22:12:47,ixigo,DEL,BLR,DEL-BLR,2026-11-16,,,,date_picker_failed,departureDate field not found on page,1
+2026-11-15 22:12:56,ixigo,DEL,BLR,DEL-BLR,2026-11-22,,,,date_picker_failed,departureDate field not found on page,7
+2026-11-15 22:13:05,ixigo,DEL,BLR,DEL-BLR,2026-11-30,,,,date_picker_failed,departureDate field not found on page,15
+2026-11-15 22:13:14,ixigo,DEL,BLR,DEL-BLR,2026-12-15,,,,date_picker_failed,departureDate field not found on page,30
+2026-11-15 22:13:22,ixigo,DEL,BLR,DEL-BLR,2026-12-30,,,,date_picker_failed,departureDate field not found on page,45
+2026-11-15 22:13:31,ixigo,BOM,BLR,BOM-BLR,2026-11-16,,,,date_picker_failed,departureDate field not found on page,1
+2026-11-15 22:13:40,ixigo,BOM,BLR,BOM-BLR,2026-11-22,,,,date_picker_failed,departureDate field not found on page,7
+2026-11-15 22:13:49,ixigo,BOM,BLR,BOM-BLR,2026-11-30,,,,date_picker_failed,departureDate field not found on page,15
+2026-11-15 22:13:57,ixigo,BOM,BLR,BOM-BLR,2026-12-15,,,,date_picker_failed,departureDate field not found on page,30
+2026-11-15 22:14:06,ixigo,BOM,BLR,BOM-BLR,2026-12-30,,,,date_picker_failed,departureDate field not found on page,45
+2026-11-15 22:14:15,ixigo,DEL,HYD,DEL-HYD,2026-11-16,,,,date_picker_failed,departureDate field not found on page,1
+2026-11-15 22:14:24,ixigo,DEL,HYD,DEL-HYD,2026-11-22,,,,date_picker_failed,departureDate field not found on page,7
+2026-11-15 22:14:33,ixigo,DEL,HYD,DEL-HYD,2026-11-30,,,,date_picker_failed,departureDate field not found on page,15
+2026-11-15 22:14:41,ixigo,DEL,HYD,DEL-HYD,2026-12-15,,,,date_picker_failed,departureDate field not found on page,30
+2026-11-15 22:14:50,ixigo,DEL,HYD,DEL-HYD,2026-12-30,,,,date_picker_failed,departureDate field not found on page,45
+2026-11-15 22:14:59,ixigo,DEL,CCU,DEL-CCU,2026-11-16,,,,date_picker_failed,departureDate field not found on page,1
+2026-11-15 22:15:08,ixigo,DEL,CCU,DEL-CCU,2026-11-22,,,,date_picker_failed,departureDate field not found on page,7
+2026-11-15 22:15:16,ixigo,DEL,CCU,DEL-CCU,2026-11-30,,,,date_picker_failed,departureDate field not found on page,15
+2026-11-15 22:15:25,ixigo,DEL,CCU,DEL-CCU,2026-12-15,,,,date_picker_failed,departureDate field not found on page,30
+2026-11-15 22:15:34,ixigo,DEL,CCU,DEL-CCU,2026-12-30,,,,date_picker_failed,departureDate field not found on page,45
