@@ -1,0 +1,57 @@
+name: Refresh airfare observations
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 00:07 India Standard Time (UTC+05:30). Scheduled workflows run on the
+    # repository's default branch; merge deployment into main to activate it.
+    - cron: "37 18 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: airfare-observation-refresh
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TZ: Asia/Kolkata
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-pipeline.txt
+
+      - name: Install pipeline dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-pipeline.txt
+
+      - name: Install Chromium for Playwright
+        run: python -m playwright install --with-deps chromium
+
+      - name: Collect airfare observations
+        run: python src/run_basket_scrape.py
+
+      - name: Commit updated observations
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/processed/live_scraped_quotes_real.csv
+          if git diff --cached --quiet; then
+            echo "No successful observation changes to commit."
+          else
+            git commit -m "Update scraped airfare observations [skip ci]"
+            git push
+          fi
