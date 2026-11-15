@@ -1,4 +1,8 @@
 venv/
 __pycache__/
+*.py[cod]
 .DS_Store
 .ipynb_checkpoints/
+.streamlit/secrets.toml
+debug_output/
+data/processed/*_backup_*.csv
