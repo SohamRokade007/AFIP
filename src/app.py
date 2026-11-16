@@ -5,6 +5,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+try:
+    from src.live_fare_index import calculate_live_fare_history
+except ModuleNotFoundError:
+    from live_fare_index import calculate_live_fare_history
+
 
 # Resolve paths from this file so Streamlit Cloud and local runs behave the same.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -121,6 +126,26 @@ with st.sidebar:
     st.markdown("---")
     st.caption("Verified fare collection runs separately through the scheduled Ignav API workflow.")
 
+# Build actual collection-day snapshots from verified Ignav rows. These are
+# separate from the historical modelled APIx series and are never interpolated.
+try:
+    df_live_history = calculate_live_fare_history(
+        df_quotes,
+        df_weights,
+        selected_sector=(
+            None
+            if selected_sector == "All Corridors (National Composite)"
+            else selected_sector
+        ),
+    )
+except Exception as exc:
+    df_live_history = pd.DataFrame()
+    st.warning(f"Could not calculate the live fare-basket snapshot: {exc}")
+
+latest_live_snapshot = (
+    df_live_history.iloc[-1] if not df_live_history.empty else None
+)
+
 # Current data coverage and freshness.
 today_ist = pd.Timestamp.now(tz="Asia/Kolkata").date()
 latest_index_date = df_daily["date"].max().date()
@@ -131,10 +156,18 @@ if not df_quotes.empty and "scrape_timestamp" in df_quotes.columns:
         latest_quote_date = latest_scrape.date()
 
 if latest_index_date < today_ist:
-    st.warning(
-        f"The modelled APIx series currently ends on {latest_index_date:%d %b %Y}. "
-        "It is historical reference data, not a live index calculated from today's scraped fares."
-    )
+    if latest_live_snapshot is not None:
+        st.warning(
+            f"The historical modelled APIx line ends on {latest_index_date:%d %b %Y}. "
+            f"A separate verified live fare-basket snapshot is available for "
+            f"{latest_live_snapshot['snapshot_date']:%d %b %Y}. "
+            "The gap contains no daily APIx observations and is intentionally not interpolated."
+        )
+    else:
+        st.warning(
+            f"The historical modelled APIx series currently ends on {latest_index_date:%d %b %Y}. "
+            "It is historical reference data, not a live index calculated from current fares."
+        )
 
 if latest_quote_date is None:
     st.warning("No verified airfare observations are available in the current dataset.")
@@ -147,9 +180,11 @@ else:
     st.success(f"Latest verified fare observations: {latest_quote_date:%d %b %Y} (India time/date).")
 
 st.info(
-    "Methodology note: the historical APIx series and forecast are still modelled outputs, "
-    "not a live index calculated from these fares. The booking-window chart separates data "
-    "providers so legacy Ixigo observations are not silently pooled with new Ignav API results."
+    "Methodology note: the historical APIx series and forecast remain modelled outputs. "
+    "The live fare-basket snapshot is a separate reference measure calculated from verified "
+    "Ignav fares, existing DGCA route weights and the project's configured reference fares. "
+    "It is shown on a separate chart axis and is not directly comparable with historical APIx. "
+    "No daily values are invented for dates without a collection."
 )
 
 # -----------------------------------------------------------------------------
@@ -163,25 +198,39 @@ pct_change = ((latest_apix - prev_apix) / prev_apix * 100) if prev_apix else 0.0
 latest_mospi = float(df_mospi["mospi_cpi_airfare"].iloc[-1]) if not df_mospi.empty else float("nan")
 latest_inflation = float(df_mospi["inflation"].iloc[-1]) if not df_mospi.empty and "inflation" in df_mospi else float("nan")
 
-k1, k2, k3, k4 = st.columns(4)
+k1, k2, k3, k4, k5 = st.columns(5)
 k1.metric("Latest modelled APIx", f"{latest_apix:.2f}", f"{pct_change:+.2f}% vs previous day")
-k2.metric("Latest MoSPI airfare CPI in file", f"{latest_mospi:.2f}" if pd.notna(latest_mospi) else "N/A")
-k3.metric("MoSPI inflation in file", f"{latest_inflation:.2f}%" if pd.notna(latest_inflation) else "N/A")
-k4.metric("Verified fare observations", f"{len(df_quotes):,}")
+k2.metric(
+    "Live fare basket (reference = 100)",
+    f"{latest_live_snapshot['snapshot_index']:.2f}" if latest_live_snapshot is not None else "N/A",
+)
+k3.metric("Latest MoSPI airfare CPI in file", f"{latest_mospi:.2f}" if pd.notna(latest_mospi) else "N/A")
+k4.metric("MoSPI inflation in file", f"{latest_inflation:.2f}%" if pd.notna(latest_inflation) else "N/A")
+k5.metric("Verified fare observations", f"{len(df_quotes):,}")
 
-st.caption(
-    f"Modelled APIx data coverage: {df_daily['date'].min():%d %b %Y} to "
+coverage_caption = (
+    f"Historical modelled APIx coverage: {df_daily['date'].min():%d %b %Y} to "
     f"{df_daily['date'].max():%d %b %Y}."
 )
+if latest_live_snapshot is not None:
+    coverage_caption += (
+        f" Latest separate live fare-basket snapshot: "
+        f"{latest_live_snapshot['snapshot_date']:%d %b %Y} "
+        f"({int(latest_live_snapshot['route_count'])} covered routes, "
+        f"{int(latest_live_snapshot['observation_count'])} observations)."
+    )
+st.caption(coverage_caption)
 st.markdown("---")
 
 # -----------------------------------------------------------------------------
-# 2. Modelled daily index vs monthly benchmark
+# 2. Historical modelled index and live fare-basket snapshots
 # -----------------------------------------------------------------------------
-st.markdown("## 2. Modelled Daily Index vs Monthly CPI Benchmark")
+st.markdown("## 2. Historical Modelled APIx and Live Fare-Basket Snapshots")
 st.caption(
-    "The daily historical series is generated by the current index model. "
-    "The monthly CPI line is the benchmark dataset committed with this project."
+    "Left axis: the existing modelled APIx history and monthly MoSPI benchmark. "
+    "Right axis: actual verified fare-basket snapshots on collection dates only. "
+    "The live basket uses configured reference fares = 100 and is not directly comparable "
+    "with the modelled historical APIx scale."
 )
 
 if selected_sector == "All Corridors (National Composite)":
@@ -216,15 +265,82 @@ if selected_sector == "All Corridors (National Composite)" and not df_mospi.empt
             hovertemplate="<b>Month</b>: %{x|%B %Y}<br><b>CPI</b>: %{y:.2f}<extra></extra>",
         )
     )
+
+if not df_live_history.empty:
+    live_text = [""] * len(df_live_history)
+    live_text[-1] = "Latest live snapshot"
+    live_customdata = df_live_history[
+        ["observation_count", "route_count", "lead_windows"]
+    ].to_numpy()
+    fig_trend.add_trace(
+        go.Scatter(
+            x=df_live_history["snapshot_date"],
+            y=df_live_history["snapshot_index"],
+            yaxis="y2",
+            mode="lines+markers+text",
+            name="Live fare-basket snapshot",
+            text=live_text,
+            textposition="top center",
+            line=dict(color="#ffaa00", width=2, dash="dot"),
+            marker=dict(color="#ffaa00", size=11, symbol="diamond"),
+            customdata=live_customdata,
+            connectgaps=False,
+            hovertemplate=(
+                "<b>Verified live fare basket</b><br>"
+                "Collection date: %{x|%d %b %Y}<br>"
+                "Reference-basket points: %{y:.2f}<br>"
+                "Verified fares: %{customdata[0]}<br>"
+                "Covered routes: %{customdata[1]}<br>"
+                "Booking windows: %{customdata[2]}"
+                "<extra></extra>"
+            ),
+        )
+    )
+
+    latest_live_date = pd.Timestamp(df_live_history["snapshot_date"].max())
+    if latest_live_date > pd.Timestamp(latest_index_date) + pd.Timedelta(days=1):
+        fig_trend.add_vrect(
+            x0=pd.Timestamp(latest_index_date) + pd.Timedelta(days=1),
+            x1=latest_live_date - pd.Timedelta(days=1),
+            fillcolor="rgba(255, 170, 0, 0.045)",
+            line_width=0,
+            layer="below",
+            annotation_text="No daily historical APIx observations",
+            annotation_position="top left",
+            annotation_font_color="#ffaa00",
+        )
+else:
+    st.warning(
+        "No verified live fare-basket snapshot is available for the selected route."
+    )
+
+right_axis_max = (
+    max(150.0, float(df_live_history["snapshot_index"].max()) * 1.2)
+    if not df_live_history.empty
+    else 150.0
+)
 fig_trend.update_layout(
     template="plotly_dark",
     hovermode="x unified",
     xaxis_title="Date",
-    yaxis_title="Index value (base 2024 = 100)",
-    margin=dict(l=20, r=20, t=30, b=20),
+    yaxis=dict(title="Historical modelled APIx / MoSPI index"),
+    yaxis2=dict(
+        title="Live fare basket (configured reference fares = 100)",
+        overlaying="y",
+        side="right",
+        showgrid=False,
+        rangemode="tozero",
+        range=[0, right_axis_max],
+    ),
+    margin=dict(l=20, r=35, t=30, b=20),
     legend=dict(orientation="h", y=1.12, x=0),
 )
 st.plotly_chart(fig_trend, width="stretch")
+st.caption(
+    "Live snapshots appear only on dates when the API collector ran. The first live point is "
+    "not connected to the older modelled line; as daily collections accumulate, only actual "
+    "live collection points will be connected to one another."
+)
 st.markdown("---")
 
 # -----------------------------------------------------------------------------
