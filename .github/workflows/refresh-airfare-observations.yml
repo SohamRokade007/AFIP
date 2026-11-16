@@ -20,6 +20,8 @@ jobs:
     timeout-minutes: 45
     env:
       TZ: Asia/Kolkata
+      IGNAV_API_KEY: ${{ secrets.IGNAV_API_KEY }}
+      IGNAV_MARKET: IN
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -50,9 +52,6 @@ jobs:
 
       - name: Collect verified airfare observations
         id: scrape
-        env:
-          IGNAV_API_KEY: ${{ secrets.IGNAV_API_KEY }}
-          IGNAV_MARKET: IN
         run: python src/run_ignav_collection.py --market IN
 
       - name: Validate newly collected fares
@@ -74,7 +73,7 @@ jobs:
           run_rows = df[df["scrape_timestamp"] >= started_at].copy()
 
           if run_rows.empty:
-              print("No rows were written by this scraper run.")
+              print("No rows were written by this collection run.")
               sys.exit(1)
 
           print("Rows written by this run:", len(run_rows))
@@ -93,8 +92,8 @@ jobs:
           print("New successful fare observations:", len(successful))
           if successful.empty:
               print(
-                  "ERROR: The scraper completed but collected zero valid fares. "
-                  "Inspect the uploaded ixigo-scraper-debug artifact."
+                  "ERROR: No new verified INR fares were collected. "
+                  "Inspect the uploaded Ignav collection summary artifact."
               )
               sys.exit(1)
           PY
