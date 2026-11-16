@@ -20,7 +20,7 @@ The dashboard uses files under `data/processed/`. It refreshes its in-memory dat
 
 1. Open [Streamlit Community Cloud](https://share.streamlit.io/).
 2. Sign in with GitHub and select this repository.
-3. Select branch `deployment` while testing this release.
+3. Select branch `main` for the current production release.
 4. Set the main file path to `src/app.py`.
 5. Deploy. Streamlit Cloud installs the dashboard dependencies from the root `requirements.txt`.
 
@@ -32,9 +32,11 @@ The workflow at `.github/workflows/refresh-airfare-observations.yml` runs the fi
 
 - The scheduled run is configured for 00:07 India Standard Time (18:37 UTC).
 - The workflow can also be started manually from **GitHub → Actions → Refresh airfare observations → Run workflow**.
-- The scraper checks the target site's `robots.txt` and refuses to scrape when the rules disallow it or the file cannot be checked. A completed workflow does not guarantee that new fares were available or collected.
+- The scraper checks the target site's `robots.txt` (cached once per run) and refuses to scrape when the rules disallow it or the file cannot be checked. It recognizes explicit rate-limit/access-denial pages and stops immediately rather than misreporting them as missing date-picker selectors or continuing to send requests. It waits 20 seconds between searches. Respect any source-side rate limit; do not repeatedly re-run a blocked job.
 - GitHub scheduled workflows run only from the repository's default branch. The daily schedule therefore becomes active after this deployment branch is merged into `main`. Manual workflow dispatch can be used to test the workflow from `deployment`.
 - The workflow needs repository Actions to be enabled and the workflow token to have permission to write contents. Its YAML requests `contents: write`.
+
+The workflow commits a refreshed quote CSV only if validation finds at least one newly collected positive fare. Failed/rate-limited runs preserve their HTML and screenshot bundle as an Actions artifact but do not overwrite published observations.
 
 The observation workflow deliberately does **not** regenerate the historical APIx series or the SARIMAX forecast. Those calculations need a validated index methodology that incorporates real scraped fares; the current index engine still generates modelled values independently of the scraper.
 
