@@ -61,7 +61,7 @@ def _prepare_latest_batches(quotes: pd.DataFrame) -> pd.DataFrame:
     else:
         explicit_batch = pd.Series("", index=data.index, dtype="object")
 
-    note_batch = notes.str.extract(r"(?:^|;\\s*)collection_batch=([^;]+)", expand=False)
+    note_batch = notes.str.extract(r"(?:^|;\s*)collection_batch=([^;]+)", expand=False)
     data["_batch"] = explicit_batch.where(explicit_batch.ne(""), note_batch)
     missing_batch = data["_batch"].isna() | data["_batch"].astype(str).eq("")
     if missing_batch.any():
