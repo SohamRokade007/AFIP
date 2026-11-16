@@ -24,11 +24,11 @@ The dashboard uses files under `data/processed/`. It refreshes its in-memory dat
 4. Set the main file path to `src/app.py`.
 5. Deploy. Streamlit Cloud installs the dashboard dependencies from the root `requirements.txt`.
 
-After validating the deployment, merge `deployment` into `main` and change the Streamlit app's selected branch to `main` if you want the production dashboard to follow the default branch.
+The production Streamlit app is configured to follow the `main` branch.
 
 ## Automated airfare observations
 
-The workflow at `.github/workflows/refresh-airfare-observations.yml` runs the five-route/five-lead-window scraper and commits successful additions to `data/processed/live_scraped_quotes_real.csv`.
+The workflow at `.github/workflows/refresh-airfare-observations.yml` runs the five-route/five-lead-window Ignav API collector and commits verified observations to `data/processed/live_scraped_quotes_real.csv`.
 
 - The scheduled run is configured for 00:07 India Standard Time (18:37 UTC).
 - The workflow can also be started manually from **GitHub → Actions → Refresh airfare observations → Run workflow**.
@@ -37,7 +37,7 @@ The workflow at `.github/workflows/refresh-airfare-observations.yml` runs the fi
 - Add your Ignav API key under **GitHub → Settings → Secrets and variables → Actions → New repository secret**, using the name `IGNAV_API_KEY`. Do not put the key in a code file or commit it.
 - Ignav currently includes 1,000 one-time free successful requests, then charges $2 per 1,000 successful requests. At 25 searches per daily run, one run per day uses about 750 searches per 30-day month; the free allowance lasts about 40 days at that cadence. Repeated manual runs also use the allowance. Set an account spending limit before unattended collection.
 - The collector calls the Ignav one-way fares API for five domestic routes and five booking windows using India market (`IN`, INR). It stores only itineraries whose API price status is `verified` and whose returned currency is INR. The API key is read from the `IGNAV_API_KEY` GitHub Actions secret and must never be committed to this repository.
-- GitHub scheduled workflows run only from the repository's default branch. The daily schedule therefore becomes active after this deployment branch is merged into `main`. Manual workflow dispatch can be used to test the workflow from `deployment`.
+- GitHub scheduled workflows run only from the repository's default branch. The daily schedule is active from `main`; manual workflow dispatch should also use `main`.
 - The workflow needs repository Actions to be enabled and the workflow token to have permission to write contents. Its YAML requests `contents: write`.
 - The workflow runs offline unit tests before it checks the API secret and starts any billable API requests.
 
@@ -48,7 +48,7 @@ The observation workflow deliberately does **not** regenerate the historical API
 ## Dependencies
 
 - `requirements.txt`: dashboard runtime.
-- `requirements-pipeline.txt`: scraper, index/forecast research pipeline and their additional dependencies.
+- `requirements-pipeline.txt`: index/forecast research pipeline dependencies used for local modelling.
 
 ## Repository layout
 
