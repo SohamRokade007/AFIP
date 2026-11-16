@@ -21,7 +21,7 @@ ROUTE_BASKET = [
 
 ADVANCE_WINDOWS_DAYS = [1, 7, 15, 30, 45]
 
-POLITE_DELAY_BETWEEN_SEARCHES = 5.0  # seconds
+POLITE_DELAY_BETWEEN_SEARCHES = 20.0  # seconds between distinct searches
 
 OUTPUT_CSV = Path("data/processed/live_scraped_quotes_real.csv")
 
@@ -97,6 +97,16 @@ async def run_basket():
 
                 ok_count = (df_chunk["status"] == "ok").sum()
                 print(f"    -> {len(df_chunk)} record(s) written, {ok_count} with status='ok'")
+
+                stop_statuses = {"rate_limited", "blocked_by_source", "blocked_by_robots_txt"}
+                stop_rows = df_chunk[df_chunk["status"].isin(stop_statuses)]
+                if not stop_rows.empty:
+                    stop_status = stop_rows["status"].iloc[0]
+                    print(
+                        f"\n[stop] Source status is '{stop_status}'. "
+                        "Stopping the basket immediately; no further requests will be sent."
+                    )
+                    return
 
             if attempt_num < total_attempts:
                 await asyncio.sleep(POLITE_DELAY_BETWEEN_SEARCHES)
