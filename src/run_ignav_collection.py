@@ -43,6 +43,10 @@ class ProviderError(RuntimeError):
     """An API error that should stop collection without publishing bad data."""
 
 
+class UnsupportedSearchError(ProviderError):
+    """A date/route combination the provider cannot search; continue other windows."""
+
+
 def write_summary(summary: dict[str, Any]) -> None:
     DEBUG_DIR.mkdir(parents=True, exist_ok=True)
     SUMMARY_PATH.write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -100,6 +104,10 @@ def api_post(api_key: str, payload: dict[str, Any], timeout: int = 45) -> dict[s
                 print(f"[Ignav] Temporary 503; retrying after {delay}s.")
                 time.sleep(delay)
                 continue
+            if code == "unsupported_search":
+                raise UnsupportedSearchError(
+                    f"Ignav does not support this route/date combination: {message}"
+                ) from exc
             if exc.code == 401:
                 raise ProviderError("Ignav rejected the API key (HTTP 401). Check IGNAV_API_KEY.") from exc
             if exc.code == 403:
@@ -272,7 +280,41 @@ def run_collection(market: str = "IN") -> dict[str, Any]:
                 }
                 print(f"[Ignav] {origin}-{destination}, {departure_date} (T+{lead_days})")
                 summary["requests_attempted"] += 1
-                response = api_post(api_key, payload)
+                try:
+                    response = api_post(api_key, payload)
+                except UnsupportedSearchError as exc:
+                    details = {
+                        "outcome": "unsupported_search",
+                        "itineraries_returned": 0,
+                        "verified_inr_fares": 0,
+                        "skipped_unverified": 0,
+                        "skipped_currency": 0,
+                        "provider_observed_at": None,
+                        "error": str(exc),
+                        "origin": origin,
+                        "destination": destination,
+                        "departure_date": departure_date,
+                        "lead_time_days": lead_days,
+                    }
+                    summary["searches"].append(details)
+                    diagnostic_row = {
+                        "scrape_timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "source_platform": "ignav",
+                        "origin": origin,
+                        "destination": destination,
+                        "sector": f"{origin}-{destination}",
+                        "departure_date": departure_date,
+                        "carrier": "",
+                        "raw_price_text": "",
+                        "parsed_fare_inr": "",
+                        "status": "unsupported_search",
+                        "notes": f"provider=ignav; {exc}",
+                        "lead_time_days": lead_days,
+                    }
+                    has_header = append_rows([diagnostic_row], has_header)
+                    time.sleep(0.25)
+                    continue
+
                 rows, details = build_quote_rows(
                     response, origin, destination, departure_date, lead_days, market
                 )
