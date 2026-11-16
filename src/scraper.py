@@ -191,6 +191,8 @@ class ScrapedFare:
     #                            needs calendar selector recalibration
     #   "blocked_or_timeout" -- navigation/render never completed
     #   "blocked_by_robots_txt" -- robots.txt disallowed this URL
+    #   "rate_limited"          -- source explicitly returned a rate-limit page
+    #   "blocked_by_source"     -- source explicitly denied or challenged access
     notes: Optional[str] = None
  
  
@@ -198,43 +200,62 @@ class ScrapedFare:
 # robots.txt compliance -- required by the problem statement
 # ---------------------------------------------------------------------------
  
+_ROBOTS_CACHE: dict[str, object] = {}
+
+
 def is_scraping_allowed(target_url: str, user_agent: str = "*") -> bool:
     """
-    Checks robots.txt for the target host before we touch the search page.
-    Fails CLOSED: if robots.txt can't be fetched/parsed, we do not assume
-    permission -- we refuse to scrape and say so.
- 
-    Fetches manually (instead of RobotFileParser.read(), which uses urllib's
-    default SSL context) so we can hand it certifi's CA bundle -- Python venvs
-    on macOS frequently lack access to the system root store and raise
-    CERTIFICATE_VERIFY_FAILED on every HTTPS request otherwise.
+    Check robots.txt once per host per process, then evaluate each URL against
+    the cached rules. Fetch/parse failures fail closed. HTTP 404 means there is
+    no robots.txt file, so the conventional allow-all policy applies.
     """
     parsed = urlparse(target_url)
     robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
-    rp = urllib.robotparser.RobotFileParser()
-    rp.set_url(robots_url)
- 
-    try:
-        req = urllib.request.Request(robots_url, headers={"User-Agent": "APIx-Bot/0.1 (+research)"})
-        with urllib.request.urlopen(req, timeout=10, context=SSL_CONTEXT) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-        rp.parse(raw.splitlines())
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            # No robots.txt at all is conventionally treated as "allow everything".
-            print(f"[robots.txt] {robots_url} -> 404, treating as allowed.")
-            return True
-        print(f"[robots.txt] HTTP error fetching {robots_url} ({e}). Refusing to scrape (fail closed).")
+
+    if robots_url not in _ROBOTS_CACHE:
+        rp = urllib.robotparser.RobotFileParser()
+        rp.set_url(robots_url)
+        try:
+            req = urllib.request.Request(
+                robots_url,
+                headers={"User-Agent": "APIx-Bot/0.1 (+research)"},
+            )
+            with urllib.request.urlopen(req, timeout=10, context=SSL_CONTEXT) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+            rp.parse(raw.splitlines())
+            _ROBOTS_CACHE[robots_url] = rp
+            print(f"[robots.txt] Cached rules from {robots_url}")
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                print(f"[robots.txt] {robots_url} -> 404, treating as allowed.")
+                _ROBOTS_CACHE[robots_url] = None
+            else:
+                print(
+                    f"[robots.txt] HTTP error fetching {robots_url} ({exc}). "
+                    "Refusing to scrape (fail closed)."
+                )
+                _ROBOTS_CACHE[robots_url] = False
+        except Exception as exc:
+            print(
+                f"[robots.txt] Could not fetch {robots_url} ({exc}). "
+                "Refusing to scrape (fail closed)."
+            )
+            _ROBOTS_CACHE[robots_url] = False
+
+    cached_rules = _ROBOTS_CACHE[robots_url]
+    if cached_rules is False:
         return False
-    except Exception as e:
-        print(f"[robots.txt] Could not fetch {robots_url} ({e}). Refusing to scrape (fail closed).")
-        return False
- 
-    allowed = rp.can_fetch(user_agent, target_url)
-    print(f"[robots.txt] {robots_url} -> {'ALLOWED' if allowed else 'DISALLOWED'} for {target_url}")
+    if cached_rules is None:
+        return True
+
+    allowed = cached_rules.can_fetch(user_agent, target_url)
+    print(
+        f"[robots.txt] {robots_url} -> "
+        f"{'ALLOWED' if allowed else 'DISALLOWED'} for {target_url}"
+    )
     return allowed
- 
- 
+
+
 # ---------------------------------------------------------------------------
 # Extraction helpers
 # ---------------------------------------------------------------------------
@@ -272,6 +293,53 @@ async def get_testid_text(page, testid: str) -> Optional[str]:
         return None
  
  
+async def detect_source_restriction(page, response) -> tuple[Optional[str], Optional[str]]:
+    """Detect rate-limit/access-block interstitials before date-picker handling."""
+    response_status = getattr(response, "status", None) if response else None
+    if response_status == 429:
+        return "rate_limited", "Ixigo returned HTTP 429 Too Many Requests."
+
+    try:
+        page_title = (await page.title()).strip()
+    except Exception:
+        page_title = ""
+
+    try:
+        body_text = await page.locator("body").inner_text(timeout=2500)
+    except Exception:
+        body_text = ""
+
+    combined = f"{page_title} {body_text}".lower()
+    rate_limit_phrases = (
+        "too many requests",
+        "rate limit exceeded",
+        "rate limited",
+        "too many request",
+    )
+    if any(phrase in combined for phrase in rate_limit_phrases):
+        detail = page_title or "The source displayed a rate-limit message."
+        return "rate_limited", f"Ixigo rate-limited this run: {detail}"
+
+    if response_status in (401, 403):
+        return "blocked_by_source", (
+            f"Ixigo returned HTTP {response_status}; access was not granted."
+        )
+
+    blocked_phrases = (
+        "access denied",
+        "request blocked",
+        "verify you are human",
+        "unusual traffic",
+        "automated requests",
+        "robot check",
+    )
+    if any(phrase in combined for phrase in blocked_phrases):
+        detail = page_title or "The source displayed an access restriction."
+        return "blocked_by_source", f"Ixigo blocked this request: {detail}"
+
+    return None, None
+
+
 async def scan_for_price_candidates(page) -> list[dict]:
     """
     Class-name-agnostic fallback: walk every text node on the rendered page
@@ -471,8 +539,22 @@ async def scrape_one_search(origin: str, dest: str, date_str: str) -> list[Scrap
             attempt += 1
             try:
                 print(f"[{SOURCE_NAME}] Attempt {attempt}: navigating to {search_url}")
-                await page.goto(search_url, timeout=REQUEST_TIMEOUT_MS, wait_until="domcontentloaded")
-                await page.wait_for_timeout(3000)  # let the SPA hydrate
+                response = await page.goto(
+                    search_url,
+                    timeout=REQUEST_TIMEOUT_MS,
+                    wait_until="domcontentloaded",
+                )
+                await page.wait_for_timeout(1200)
+
+                restriction_status, restriction_note = await detect_source_restriction(
+                    page, response
+                )
+                if restriction_status:
+                    status = restriction_status
+                    notes = restriction_note
+                    print(f"[{SOURCE_NAME}] {status}: {notes}")
+                    # Honour the source's restriction and stop this run.
+                    break
  
                 # Confirm the widget actually reflects our route -- catches
                 # silent param-format mismatches before we trust anything else.
