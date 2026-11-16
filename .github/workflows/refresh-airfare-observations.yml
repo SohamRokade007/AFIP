@@ -38,15 +38,22 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-pipeline.txt
 
-      - name: Install Chromium for Playwright
-        run: python -m playwright install --with-deps chromium
+      - name: Verify API secret is configured
+        run: |
+          if [ -z "$IGNAV_API_KEY" ]; then
+            echo "::error::IGNAV_API_KEY is missing. Add it under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
 
       - name: Record scrape start time
         run: echo "SCRAPE_STARTED_AT=$(date '+%Y-%m-%d %H:%M:%S')" >> "$GITHUB_ENV"
 
-      - name: Collect airfare observations
+      - name: Collect verified airfare observations
         id: scrape
-        run: python src/run_basket_scrape.py
+        env:
+          IGNAV_API_KEY: ${{ secrets.IGNAV_API_KEY }}
+          IGNAV_MARKET: IN
+        run: python src/run_ignav_collection.py --market IN
 
       - name: Validate newly collected fares
         id: validate
@@ -105,11 +112,11 @@ jobs:
             git push
           fi
 
-      - name: Upload scraper debug bundle
+      - name: Upload API collection diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ixigo-scraper-debug-${{ github.run_id }}
-          path: debug_output/
+          name: ignav-api-collection-${{ github.run_id }}
+          path: api_debug/
           if-no-files-found: warn
           retention-days: 7
