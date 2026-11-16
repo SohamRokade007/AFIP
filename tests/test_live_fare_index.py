@@ -64,6 +64,28 @@ class LiveFareIndexTests(unittest.TestCase):
         self.assertAlmostEqual(history.iloc[0]["snapshot_index"], 200.0, places=6)
         self.assertEqual(int(history.iloc[0]["route_count"]), 1)
 
+
+    def test_normalizes_api_route_codes_before_index_calculation(self):
+        rows = self.make_rows(
+            "20261116T000700",
+            "2026-11-16 00:07:10",
+            [5100] * 5,
+            [5600] * 5,
+        )
+        route_codes = {
+            "DELHI-MUMBAI": "DEL-BOM",
+            "DELHI-BANGALORE": "DEL-BLR",
+        }
+        for row in rows:
+            row["sector"] = route_codes[row["sector"]]
+
+        history = calculate_live_fare_history(pd.DataFrame(rows), self.weights)
+
+        self.assertEqual(len(history), 1)
+        self.assertEqual(int(history.iloc[0]["route_count"]), 2)
+        self.assertEqual(int(history.iloc[0]["observation_count"]), 10)
+        self.assertAlmostEqual(history.iloc[0]["snapshot_index"], 100.0, places=6)
+
     def test_ignores_unverified_or_non_ignav_rows(self):
         rows = self.make_rows("20261116T000700", "2026-11-16 00:07:10", [10200] * 5, [11200] * 5)
         rows.append(

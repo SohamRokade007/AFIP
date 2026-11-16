@@ -31,6 +31,14 @@ def _prepare_latest_batches(quotes: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     data = quotes.copy()
+    route_code_map = {
+        "DEL-BOM": "DELHI-MUMBAI",
+        "DEL-BLR": "DELHI-BANGALORE",
+        "BOM-BLR": "MUMBAI-BANGALORE",
+        "DEL-HYD": "DELHI-HYDERABAD",
+        "DEL-CCU": "DELHI-KOLKATA",
+    }
+    data["sector"] = data["sector"].astype(str).replace(route_code_map)
     data = data[
         data["source_platform"].astype(str).str.lower().eq("ignav")
         & data["status"].astype(str).str.lower().eq("ok")
