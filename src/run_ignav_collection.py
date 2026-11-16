@@ -174,6 +174,7 @@ def build_quote_rows(
     departure_date: str,
     lead_days: int,
     market: str,
+    collection_batch: str | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     itineraries = response.get("itineraries")
     if not isinstance(itineraries, list):
@@ -205,6 +206,8 @@ def build_quote_rows(
 
         formatted = f"₹{amount:,.2f}" if currency == "INR" else f"{currency} {amount:,.2f}"
         notes = ["provider=ignav", "price_status=verified"]
+        if collection_batch:
+            notes.append(f"collection_batch={collection_batch}")
         if observed_at:
             notes.append(f"provider_observed_at={observed_at}")
         if itinerary.get("ignav_id"):
@@ -255,8 +258,10 @@ def run_collection(market: str = "IN") -> dict[str, Any]:
 
     has_header = ensure_csv_header()
     started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    collection_batch = datetime.now().strftime("%Y%m%dT%H%M%S")
     summary: dict[str, Any] = {
         "provider": "ignav",
+        "collection_batch": collection_batch,
         "market": market,
         "currency": market_currency(market),
         "started_at": started_at,
@@ -308,7 +313,7 @@ def run_collection(market: str = "IN") -> dict[str, Any]:
                         "raw_price_text": "",
                         "parsed_fare_inr": "",
                         "status": "unsupported_search",
-                        "notes": f"provider=ignav; {exc}",
+                        "notes": f"provider=ignav; collection_batch={collection_batch}; {exc}",
                         "lead_time_days": lead_days,
                     }
                     has_header = append_rows([diagnostic_row], has_header)
@@ -316,7 +321,13 @@ def run_collection(market: str = "IN") -> dict[str, Any]:
                     continue
 
                 rows, details = build_quote_rows(
-                    response, origin, destination, departure_date, lead_days, market
+                    response,
+                    origin,
+                    destination,
+                    departure_date,
+                    lead_days,
+                    market,
+                    collection_batch=collection_batch,
                 )
                 details.update({
                     "origin": origin,
@@ -342,7 +353,8 @@ def run_collection(market: str = "IN") -> dict[str, Any]:
                         "parsed_fare_inr": "",
                         "status": details["outcome"],
                         "notes": (
-                            f"provider=ignav; returned={details['itineraries_returned']}; "
+                            f"provider=ignav; collection_batch={collection_batch}; "
+                            f"returned={details['itineraries_returned']}; "
                             f"unverified={details['skipped_unverified']}; "
                             f"currency_mismatch={details['skipped_currency']}"
                         ),
