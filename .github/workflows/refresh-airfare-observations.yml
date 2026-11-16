@@ -93,7 +93,7 @@ jobs:
           PY
 
       - name: Commit updated observations and diagnostics
-        if: always() && steps.scrape.outcome == 'success'
+        if: steps.validate.outcome == 'success'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
