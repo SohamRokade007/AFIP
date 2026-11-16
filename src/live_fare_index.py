@@ -194,3 +194,20 @@ def calculate_live_fare_history(
         return pd.DataFrame()
 
     return pd.DataFrame(snapshots).sort_values("snapshot_at").reset_index(drop=True)
+
+
+
+def get_latest_ignav_quotes(quotes: pd.DataFrame) -> pd.DataFrame:
+    """Return successful fare rows from the latest actual Ignav collection batch."""
+    data = _prepare_latest_batches(quotes)
+    if data.empty:
+        return pd.DataFrame()
+    latest_batch = (
+        data.groupby("_batch")["scrape_timestamp"].max().sort_values().index[-1]
+    )
+    return (
+        data[data["_batch"].eq(latest_batch)]
+        .drop(columns=["_batch"])
+        .sort_values(["sector", "lead_time_days", "parsed_fare_inr"])
+        .reset_index(drop=True)
+    )
