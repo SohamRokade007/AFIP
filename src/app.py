@@ -69,7 +69,7 @@ def load_data():
         forecast = forecast.dropna(subset=["date"]).sort_values("date")
 
     # Provider-specific observations share the schema but remain separated by source_platform.
-    # Do not substitute the older generated/synthetic quote file here.
+    # The older Ixigo rows remain visible as a separate series; no synthetic quote file is used.
     route_code_map = {
         "DEL-BOM": "DELHI-MUMBAI",
         "DEL-BLR": "DELHI-BANGALORE",
@@ -140,11 +140,11 @@ if latest_quote_date is None:
     st.warning("No successful scraped airfare observations are available in the current dataset.")
 elif latest_quote_date < today_ist:
     st.warning(
-        f"The latest successful scraped fare observations are dated {latest_quote_date:%d %b %Y}. "
-        "The airfare observations are stale until the scraper runs successfully again."
+        f"The latest verified fare observations are dated {latest_quote_date:%d %b %Y}. "
+        "The fare observations are stale until the next successful provider collection."
     )
 else:
-    st.success(f"Latest successful scraped fare observations: {latest_quote_date:%d %b %Y} (India time/date).")
+    st.success(f"Latest verified fare observations: {latest_quote_date:%d %b %Y} (India time/date).")
 
 st.info(
     "Methodology note: the historical APIx series and forecast are still modelled outputs, "
