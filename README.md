@@ -1,8 +1,8 @@
 # AFIP — Airfare Price Index & Intelligence Prototype
 
-AFIP is an independent academic/research prototype for examining domestic airfare patterns in India. It combines a Streamlit dashboard, an Ixigo-based airfare observation scraper, route passenger weights, a modelled daily index, and a SARIMAX forecasting experiment.
+AFIP is an independent academic/research prototype for examining domestic airfare patterns in India. It combines a Streamlit dashboard, a scheduled Ignav flight-prices API collector, route passenger weights, a modelled daily index, and a SARIMAX forecasting experiment.
 
-> **Important:** This is not an official Government of India or Ministry of Statistics and Programme Implementation (MoSPI) service. In the current version, the historical APIx series and forecast are modelled outputs; they are not yet calculated from the real scraped airfare observations. The booking-window chart uses successful rows from the separate Ixigo scraper output.
+> **Important:** This is not an official Government of India or Ministry of Statistics and Programme Implementation (MoSPI) service. In the current version, the historical APIx series and forecast are modelled outputs; they are not yet calculated from verified provider fare observations. The booking-window chart displays observations by provider and does not silently pool different sources.
 
 ## Run the dashboard locally
 
@@ -24,34 +24,36 @@ The dashboard uses files under `data/processed/`. It refreshes its in-memory dat
 4. Set the main file path to `src/app.py`.
 5. Deploy. Streamlit Cloud installs the dashboard dependencies from the root `requirements.txt`.
 
-After validating the deployment, merge `deployment` into `main` and change the Streamlit app's selected branch to `main` if you want the production dashboard to follow the default branch.
+The production Streamlit app is configured to follow the `main` branch.
 
 ## Automated airfare observations
 
-The workflow at `.github/workflows/refresh-airfare-observations.yml` runs the five-route/five-lead-window scraper and commits successful additions to `data/processed/live_scraped_quotes_real.csv`.
+The workflow at `.github/workflows/refresh-airfare-observations.yml` runs the five-route/five-lead-window Ignav API collector and commits verified observations to `data/processed/live_scraped_quotes_real.csv`.
 
 - The scheduled run is configured for 00:07 India Standard Time (18:37 UTC).
 - The workflow can also be started manually from **GitHub → Actions → Refresh airfare observations → Run workflow**.
-- The scraper checks the target site's `robots.txt` (cached once per run) and refuses to scrape when the rules disallow it or the file cannot be checked. It recognizes explicit rate-limit/access-denial pages and stops immediately rather than misreporting them as missing date-picker selectors or continuing to send requests. It waits 20 seconds between searches. Respect any source-side rate limit; do not repeatedly re-run a blocked job.
-- GitHub scheduled workflows run only from the repository's default branch. The daily schedule therefore becomes active after this deployment branch is merged into `main`. Manual workflow dispatch can be used to test the workflow from `deployment`.
+- Add your Ignav API key under **GitHub → Settings → Secrets and variables → Actions → New repository secret**, using the name `IGNAV_API_KEY`. Do not put the key in a code file or commit it.
+- Ignav currently includes 1,000 one-time free successful requests, then charges $2 per 1,000 successful requests. At 25 requests per daily run, one run per day can use up to 750 successful billable requests in a 30-day month; the 1,000-request free allowance lasts about 40 days at that cadence if all requests succeed. Failed HTTP requests are not billed. Repeated manual runs also use the allowance. Set an account spending limit before unattended collection.
+- The collector calls the Ignav one-way fares API for five domestic routes and five booking windows using India market (`IN`, INR). It stores only itineraries whose API price status is `verified` and whose returned currency is INR. The API key is read from the `IGNAV_API_KEY` GitHub Actions secret and must never be committed to this repository.
+- GitHub scheduled workflows run only from the repository's default branch. The daily schedule is active from `main`; manual workflow dispatch should also use `main`.
 - The workflow needs repository Actions to be enabled and the workflow token to have permission to write contents. Its YAML requests `contents: write`.
+- The workflow runs offline unit tests before it checks the API secret and starts any billable API requests.
 
-The workflow commits a refreshed quote CSV only if validation finds at least one newly collected positive fare. Failed/rate-limited runs preserve their HTML and screenshot bundle as an Actions artifact but do not overwrite published observations.
+The workflow commits a refreshed quote CSV only if validation finds at least one newly collected positive INR fare. Failed requests, empty results, unverified prices, and currency mismatches do not overwrite published observations. A JSON collection summary is uploaded as a short-lived Actions artifact. Ignav's `observed_at` is retained as source metadata; it records when the provider retrieved the result, may reflect a result reused for up to 30 minutes, and is not a guarantee that a fare remains available.
 
 The observation workflow deliberately does **not** regenerate the historical APIx series or the SARIMAX forecast. Those calculations need a validated index methodology that incorporates real scraped fares; the current index engine still generates modelled values independently of the scraper.
 
 ## Dependencies
 
 - `requirements.txt`: dashboard runtime.
-- `requirements-pipeline.txt`: scraper, index/forecast research pipeline and their additional dependencies.
+- `requirements-pipeline.txt`: index/forecast research pipeline dependencies used for local modelling.
 
 ## Repository layout
 
 ```text
 src/
   app.py                    Streamlit dashboard
-  scraper.py                One-route Ixigo scraper
-  run_basket_scrape.py      Five-route, five-lead-window scraper
+  run_ignav_collection.py  Five-route, five-window Ignav API collector
   index_engine.py           Modelled APIx series and benchmark comparison
   forecaster.py             SARIMAX forecast experiment
   pipeline_scheduler.py     Local pipeline runner
@@ -64,9 +66,9 @@ data/
 
 ## Data interpretation
 
-- **Scraped fare observations:** successful rows written by the Ixigo scraper, stored in `live_scraped_quotes_real.csv`.
+- **Fare observations:** successful, verified INR rows returned by the configured provider, stored in `live_scraped_quotes_real.csv`. Historical Ixigo rows remain in the file and are displayed separately from Ignav observations.
 - **Historical APIx series:** currently generated by the model in `index_engine.py`; it is not yet derived from the scraped fare observations.
 - **Forecast:** generated from the modelled APIx series by `forecaster.py`.
 - **MoSPI benchmark:** reference CPI data included in the repository. Check the source release and period before making comparisons or public claims.
 
-Use the project for demonstration and research only. Scraped prices can change, may exclude fees, and are subject to the source platform's terms and availability.
+Use the project for demonstration and research only. API fare observations can change and may differ from final checkout prices. A provider quote is not a reservation or a guarantee of current availability.

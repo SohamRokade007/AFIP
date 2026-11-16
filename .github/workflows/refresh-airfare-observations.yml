@@ -30,64 +30,86 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
-          cache-dependency-path: requirements-pipeline.txt
 
-      - name: Install pipeline dependencies
+      - name: Compile collector and run offline tests
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements-pipeline.txt
+          python -m py_compile src/run_ignav_collection.py
+          python -m unittest discover -s tests -p "test_*.py" -v
 
-      - name: Install Chromium for Playwright
-        run: python -m playwright install --with-deps chromium
+      - name: Verify API secret is configured
+        env:
+          IGNAV_API_KEY: ${{ secrets.IGNAV_API_KEY }}
+        run: |
+          if [ -z "$IGNAV_API_KEY" ]; then
+            echo "::error::IGNAV_API_KEY is missing. Add it under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
 
       - name: Record scrape start time
         run: echo "SCRAPE_STARTED_AT=$(date '+%Y-%m-%d %H:%M:%S')" >> "$GITHUB_ENV"
 
-      - name: Collect airfare observations
+      - name: Collect verified airfare observations
         id: scrape
-        run: python src/run_basket_scrape.py
+        env:
+          IGNAV_API_KEY: ${{ secrets.IGNAV_API_KEY }}
+          IGNAV_MARKET: IN
+        run: python src/run_ignav_collection.py --market IN
 
       - name: Validate newly collected fares
         id: validate
         run: |
           python - <<'PY'
+          import csv
           import os
           import sys
-          import pandas as pd
+          from datetime import datetime
 
           path = "data/processed/live_scraped_quotes_real.csv"
           if not os.path.exists(path):
-              print("Scraper did not create its expected CSV file.")
+              print("Collector did not create its expected CSV file.")
               sys.exit(1)
 
-          df = pd.read_csv(path)
-          df["scrape_timestamp"] = pd.to_datetime(df["scrape_timestamp"], errors="coerce")
-          started_at = pd.to_datetime(os.environ["SCRAPE_STARTED_AT"])
-          run_rows = df[df["scrape_timestamp"] >= started_at].copy()
-
-          if run_rows.empty:
-              print("No rows were written by this scraper run.")
-              sys.exit(1)
-
-          print("Rows written by this run:", len(run_rows))
-          print("Status breakdown:")
-          print(run_rows["status"].value_counts(dropna=False).to_string())
-
-          run_rows["parsed_fare_inr"] = pd.to_numeric(
-              run_rows["parsed_fare_inr"], errors="coerce"
+          started_at = datetime.strptime(
+              os.environ["SCRAPE_STARTED_AT"], "%Y-%m-%d %H:%M:%S"
           )
-          successful = run_rows[
-              run_rows["status"].eq("ok")
-              & run_rows["parsed_fare_inr"].notna()
-              & (run_rows["parsed_fare_inr"] > 0)
-          ]
+          run_rows = []
+          successful = []
 
-          print("New successful fare observations:", len(successful))
-          if successful.empty:
+          with open(path, newline="", encoding="utf-8-sig") as handle:
+              for row in csv.DictReader(handle):
+                  if row.get("source_platform") != "ignav":
+                      continue
+                  try:
+                      collected_at = datetime.strptime(
+                          row.get("scrape_timestamp", ""), "%Y-%m-%d %H:%M:%S"
+                      )
+                  except ValueError:
+                      continue
+                  if collected_at < started_at:
+                      continue
+
+                  run_rows.append(row)
+                  try:
+                      amount = float(row.get("parsed_fare_inr", ""))
+                  except (TypeError, ValueError):
+                      amount = 0
+                  if row.get("status") == "ok" and amount > 0:
+                      successful.append(row)
+
+          if not run_rows:
+              print("No Ignav rows were written by this collection run.")
+              sys.exit(1)
+
+          print("Ignav rows written by this run:", len(run_rows))
+          print("Status breakdown:")
+          for status in sorted({row.get("status", "") for row in run_rows}):
+              print(f"  {status}: {sum(row.get('status') == status for row in run_rows)}")
+          print("New verified INR fares:", len(successful))
+
+          if not successful:
               print(
-                  "ERROR: The scraper completed but collected zero valid fares. "
-                  "Inspect the uploaded ixigo-scraper-debug artifact."
+                  "ERROR: No new verified INR fares were collected. "
+                  "Published observations will remain unchanged."
               )
               sys.exit(1)
           PY
@@ -101,15 +123,15 @@ jobs:
           if git diff --cached --quiet; then
             echo "No observation changes to commit."
           else
-            git commit -m "Update scraped airfare observations [skip ci]"
+            git commit -m "Update verified airfare observations [skip ci]"
             git push
           fi
 
-      - name: Upload scraper debug bundle
+      - name: Upload API collection diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ixigo-scraper-debug-${{ github.run_id }}
-          path: debug_output/
+          name: ignav-api-collection-${{ github.run_id }}
+          path: api_debug/
           if-no-files-found: warn
           retention-days: 7

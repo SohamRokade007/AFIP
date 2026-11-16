@@ -4,5 +4,3 @@ statsmodels
 holidays
 openpyxl
 matplotlib
-playwright
-certifi
