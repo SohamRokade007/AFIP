@@ -106,7 +106,7 @@ if df_daily.empty or df_weights.empty:
 # Sidebar controls.
 with st.sidebar:
     st.header("Dashboard Controls")
-    if st.button("Refresh dashboard data", use_container_width=True):
+    if st.button("Refresh dashboard data", width="stretch"):
         st.cache_data.clear()
         st.rerun()
 
@@ -119,7 +119,7 @@ with st.sidebar:
         options=["All Corridors (National Composite)"] + all_sectors,
     )
     st.markdown("---")
-    st.caption("Data collection is handled separately by the repository's scheduled scraper workflow.")
+    st.caption("Verified fare collection runs separately through the scheduled Ignav API workflow.")
 
 # Current data coverage and freshness.
 today_ist = pd.Timestamp.now(tz="Asia/Kolkata").date()
@@ -147,9 +147,9 @@ else:
     st.success(f"Latest successful scraped fare observations: {latest_quote_date:%d %b %Y} (India time/date).")
 
 st.info(
-    "Methodology note: the historical APIx series and forecast are currently modelled outputs. "
-    "The booking-window chart below uses successful rows from the real Ixigo scraper output. "
-    "These are separate data streams and should not be interpreted as an already-integrated live index."
+    "Methodology note: the historical APIx series and forecast are still modelled outputs, "
+    "not a live index calculated from these fares. The booking-window chart separates data "
+    "providers so legacy Ixigo observations are not silently pooled with new Ignav API results."
 )
 
 # -----------------------------------------------------------------------------
@@ -224,7 +224,7 @@ fig_trend.update_layout(
     margin=dict(l=20, r=20, t=30, b=20),
     legend=dict(orientation="h", y=1.12, x=0),
 )
-st.plotly_chart(fig_trend, use_container_width=True)
+st.plotly_chart(fig_trend, width="stretch")
 st.markdown("---")
 
 # -----------------------------------------------------------------------------
@@ -280,16 +280,16 @@ else:
         margin=dict(l=20, r=20, t=30, b=20),
         legend=dict(orientation="h", y=1.12, x=0),
     )
-    st.plotly_chart(fig_fc, use_container_width=True)
+    st.plotly_chart(fig_fc, width="stretch")
 st.markdown("---")
 
 # -----------------------------------------------------------------------------
 # 4. Advance booking curves from actual scraper output
 # -----------------------------------------------------------------------------
-st.markdown("## 4. Advance Booking Price Curves — Scraped Observations")
+st.markdown("## 4. Advance Booking Price Curves — Verified Fare Observations")
 st.caption(
-    "Averages are computed only from rows marked status='ok' by the Ixigo scraper. "
-    "Routes/windows without successful observations are not filled with synthetic prices."
+    "Averages use only successful fare observations. Different providers are shown separately; "
+    "routes/windows without verified observations are not filled with synthetic prices."
 )
 
 quotes_view = df_quotes.copy()
@@ -300,7 +300,7 @@ if quotes_view.empty:
     st.info("There are no successful scraped observations for this route in the current dataset.")
 else:
     lead_summary = (
-        quotes_view.groupby(["sector", "lead_time_days"], as_index=False)
+        quotes_view.groupby(["source_platform", "sector", "lead_time_days"], as_index=False)
         .agg(average_fare_inr=("parsed_fare_inr", "mean"), observations=("parsed_fare_inr", "count"))
         .sort_values("lead_time_days")
     )
@@ -309,12 +309,14 @@ else:
         x="lead_time_days",
         y="average_fare_inr",
         color="sector",
+        line_dash="source_platform",
         markers=True,
         hover_data={"observations": True, "lead_time_days": True, "average_fare_inr": ":,.0f"},
         labels={
             "lead_time_days": "Days before departure",
             "average_fare_inr": "Average observed fare (INR)",
             "sector": "Flight route",
+            "source_platform": "Data provider",
         },
     )
     fig_curves.update_layout(
@@ -325,17 +327,18 @@ else:
         margin=dict(l=20, r=20, t=30, b=20),
         legend=dict(orientation="h", y=1.12, x=0),
     )
-    st.plotly_chart(fig_curves, use_container_width=True)
+    st.plotly_chart(fig_curves, width="stretch")
     st.dataframe(
         lead_summary.rename(
             columns={
+                "source_platform": "Data provider",
                 "sector": "Route",
                 "lead_time_days": "Lead time (days)",
                 "average_fare_inr": "Average fare (INR)",
                 "observations": "Successful observations",
             }
         ),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 st.markdown("---")
@@ -355,21 +358,21 @@ with col_w1:
         color_discrete_sequence=px.colors.sequential.RdBu,
     )
     fig_donut.update_layout(template="plotly_dark", margin=dict(l=10, r=10, t=10, b=10))
-    st.plotly_chart(fig_donut, use_container_width=True)
+    st.plotly_chart(fig_donut, width="stretch")
 with col_w2:
     st.markdown("#### Corridor weight rankings")
     st.dataframe(
         df_weights[["sector", "total_passengers", "weight"]].sort_values(
             by="weight", ascending=False
         ),
-        use_container_width=True,
+        width="stretch",
         height=350,
         hide_index=True,
     )
 
 st.markdown("---")
 st.caption(
-    "Research prototype only. Scraped fares are observations from a third-party search platform "
-    "and may differ from final airline checkout prices. Do not use this dashboard as an official "
-    "inflation statistic or as financial/policy advice."
+    "Research prototype only. API fare observations can change and may differ from final checkout prices. "
+    "A provider quote is not a ticket reservation. Do not use this dashboard as an official inflation "
+    "statistic or as financial/policy advice."
 )
