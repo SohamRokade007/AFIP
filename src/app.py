@@ -137,7 +137,7 @@ if latest_index_date < today_ist:
     )
 
 if latest_quote_date is None:
-    st.warning("No successful scraped airfare observations are available in the current dataset.")
+    st.warning("No verified airfare observations are available in the current dataset.")
 elif latest_quote_date < today_ist:
     st.warning(
         f"The latest verified fare observations are dated {latest_quote_date:%d %b %Y}. "
@@ -284,7 +284,7 @@ else:
 st.markdown("---")
 
 # -----------------------------------------------------------------------------
-# 4. Advance booking curves from actual scraper output
+# 4. Advance booking curves from provider fare observations
 # -----------------------------------------------------------------------------
 st.markdown("## 4. Advance Booking Price Curves — Verified Fare Observations")
 st.caption(
