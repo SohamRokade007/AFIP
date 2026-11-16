@@ -6,9 +6,15 @@ import plotly.graph_objects as go
 import streamlit as st
 
 try:
-    from src.live_fare_index import calculate_live_fare_history
+    from src.live_fare_index import (
+        calculate_live_fare_history,
+        get_latest_ignav_quotes,
+    )
 except ModuleNotFoundError:
-    from live_fare_index import calculate_live_fare_history
+    from live_fare_index import (
+        calculate_live_fare_history,
+        get_latest_ignav_quotes,
+    )
 
 
 # Resolve paths from this file so Streamlit Cloud and local runs behave the same.
@@ -67,11 +73,17 @@ def load_data():
     daily = daily.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
     mospi = mospi.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
 
-    forecast_path = DATA_DIR / "apix_forecast_30d.csv"
+    forecast_path = DATA_DIR / "live_fare_forecast_30d.csv"
     forecast = pd.read_csv(forecast_path) if forecast_path.exists() else pd.DataFrame()
     if not forecast.empty and "date" in forecast.columns:
         forecast["date"] = pd.to_datetime(forecast["date"], errors="coerce")
         forecast = forecast.dropna(subset=["date"]).sort_values("date")
+
+    status_path = DATA_DIR / "live_fare_forecast_status.json"
+    forecast_status = {}
+    if status_path.exists():
+        import json
+        forecast_status = json.loads(status_path.read_text(encoding="utf-8"))
 
     # Provider-specific observations share the schema but remain separated by source_platform.
     # The older Ixigo rows remain visible as a separate series; no synthetic quote file is used.
@@ -95,11 +107,11 @@ def load_data():
         quotes = quotes.dropna(subset=["parsed_fare_inr", "lead_time_days"])
         quotes = quotes[quotes["parsed_fare_inr"] > 0]
 
-    return weights, daily, mospi, quotes, forecast
+    return weights, daily, mospi, quotes, forecast, forecast_status
 
 
 try:
-    df_weights, df_daily, df_mospi, df_quotes, df_forecast = load_data()
+    df_weights, df_daily, df_mospi, df_quotes, df_forecast, forecast_status = load_data()
 except Exception as exc:
     st.error(f"The dashboard could not load its datasets: {exc}")
     st.stop()
@@ -126,11 +138,16 @@ with st.sidebar:
     st.markdown("---")
     st.caption("Verified fare collection runs separately through the scheduled Ignav API workflow.")
 
-# Build actual collection-day snapshots from verified Ignav rows. These are
-# separate from the historical modelled APIx series and are never interpolated.
+# Keep API-provider rows distinct from legacy Ixigo observations.
+df_ignav_quotes = df_quotes[
+    df_quotes.get("source_platform", pd.Series(index=df_quotes.index, dtype=str))
+    .astype(str).str.lower().eq("ignav")
+].copy()
+
+# Build actual collection-day snapshots from verified Ignav rows.
 try:
     df_live_history = calculate_live_fare_history(
-        df_quotes,
+        df_ignav_quotes,
         df_weights,
         selected_sector=(
             None
@@ -138,8 +155,10 @@ try:
             else selected_sector
         ),
     )
+    df_latest_ignav_batch = get_latest_ignav_quotes(df_ignav_quotes)
 except Exception as exc:
     df_live_history = pd.DataFrame()
+    df_latest_ignav_batch = pd.DataFrame()
     st.warning(f"Could not calculate the live fare-basket snapshot: {exc}")
 
 latest_live_snapshot = (
@@ -150,8 +169,8 @@ latest_live_snapshot = (
 today_ist = pd.Timestamp.now(tz="Asia/Kolkata").date()
 latest_index_date = df_daily["date"].max().date()
 latest_quote_date = None
-if not df_quotes.empty and "scrape_timestamp" in df_quotes.columns:
-    latest_scrape = df_quotes["scrape_timestamp"].max()
+if not df_ignav_quotes.empty and "scrape_timestamp" in df_ignav_quotes.columns:
+    latest_scrape = df_ignav_quotes["scrape_timestamp"].max()
     if pd.notna(latest_scrape):
         latest_quote_date = latest_scrape.date()
 
@@ -206,7 +225,7 @@ k2.metric(
 )
 k3.metric("Latest MoSPI airfare CPI in file", f"{latest_mospi:.2f}" if pd.notna(latest_mospi) else "N/A")
 k4.metric("MoSPI inflation in file", f"{latest_inflation:.2f}%" if pd.notna(latest_inflation) else "N/A")
-k5.metric("Verified fare observations", f"{len(df_quotes):,}")
+k5.metric("Verified Ignav fare observations", f"{len(df_ignav_quotes):,}")
 
 coverage_caption = (
     f"Historical modelled APIx coverage: {df_daily['date'].min():%d %b %Y} to "
@@ -344,68 +363,184 @@ st.caption(
 st.markdown("---")
 
 # -----------------------------------------------------------------------------
-# 3. Forecast
+# 3. Live fare outlook and 30-day forecast
 # -----------------------------------------------------------------------------
-st.markdown("## 3. Modelled 30-Day Airfare Forecast")
-if df_forecast.empty:
-    st.info("No forecast file is available yet. Run the forecasting pipeline to generate one.")
-else:
-    latest_forecast_date = df_forecast["date"].max().date()
-    if latest_forecast_date < today_ist:
-        st.warning(
-            f"The committed forecast ends on {latest_forecast_date:%d %b %Y}; "
-            "it has expired and needs to be regenerated."
+st.markdown("## 3. Live Fare Outlook and 30-Day Forecast")
+st.caption(
+    "The fare outlook below uses actual verified Ignav quotes from the latest collection batch. "
+    "It shows observed prices by departure lead time, not a prediction. The SARIMAX forecast "
+    "uses the daily live fare-basket index only after sufficient real observations accumulate."
+)
+
+if not df_latest_ignav_batch.empty:
+    current_view = df_latest_ignav_batch.copy()
+    if selected_sector != "All Corridors (National Composite)":
+        current_view = current_view[current_view["sector"] == selected_sector]
+
+    if current_view.empty:
+        st.info(
+            "The selected corridor is not part of the five-route live Ignav collection basket. "
+            "Choose one of the monitored routes to see current quotes."
         )
-    recent_daily = df_daily.tail(45)
+    else:
+        outlook = (
+            current_view.groupby(["sector", "lead_time_days"], as_index=False)
+            .agg(
+                median_fare_inr=("parsed_fare_inr", "median"),
+                average_fare_inr=("parsed_fare_inr", "mean"),
+                minimum_fare_inr=("parsed_fare_inr", "min"),
+                maximum_fare_inr=("parsed_fare_inr", "max"),
+                observations=("parsed_fare_inr", "count"),
+                departure_date=("departure_date", "first"),
+            )
+            .sort_values(["sector", "lead_time_days"])
+        )
+
+        lowest_fare = float(current_view["parsed_fare_inr"].min())
+        median_fare = float(current_view["parsed_fare_inr"].median())
+        o1, o2, o3 = st.columns(3)
+        o1.metric("Lowest fare in latest batch", f"₹{lowest_fare:,.0f}")
+        o2.metric("Median quoted fare", f"₹{median_fare:,.0f}")
+        o3.metric("Quotes in latest batch", f"{len(current_view):,}")
+
+        fig_outlook = go.Figure()
+        for sector, route_data in outlook.groupby("sector"):
+            route_data = route_data.sort_values("lead_time_days")
+            median = route_data["median_fare_inr"].to_numpy()
+            fig_outlook.add_trace(
+                go.Scatter(
+                    x=route_data["lead_time_days"],
+                    y=median,
+                    mode="lines+markers",
+                    name=sector.replace("-", " – "),
+                    customdata=route_data[
+                        ["departure_date", "minimum_fare_inr", "maximum_fare_inr", "observations"]
+                    ].to_numpy(),
+                    error_y=dict(
+                        type="data",
+                        symmetric=False,
+                        array=(route_data["maximum_fare_inr"] - route_data["median_fare_inr"]).clip(lower=0),
+                        arrayminus=(route_data["median_fare_inr"] - route_data["minimum_fare_inr"]).clip(lower=0),
+                        visible=True,
+                        thickness=1.2,
+                        width=4,
+                    ),
+                    hovertemplate=(
+                        "<b>%{fullData.name}</b><br>"
+                        "Advance booking: %{x} days<br>"
+                        "Departure date: %{customdata[0]}<br>"
+                        "Median fare: ₹%{y:,.0f}<br>"
+                        "Range: ₹%{customdata[1]:,.0f} – ₹%{customdata[2]:,.0f}<br>"
+                        "Returned itineraries: %{customdata[3]}"
+                        "<extra></extra>"
+                    ),
+                )
+            )
+        fig_outlook.update_layout(
+            template="plotly_dark",
+            hovermode="x unified",
+            xaxis=dict(
+                title="Days before departure",
+                tickmode="array",
+                tickvals=[1, 7, 15, 30, 45],
+            ),
+            yaxis_title="Observed fare (INR)",
+            legend=dict(orientation="h", y=1.12, x=0),
+            margin=dict(l=20, r=20, t=30, b=20),
+        )
+        st.plotly_chart(fig_outlook, width="stretch")
+        st.dataframe(
+            outlook.rename(
+                columns={
+                    "sector": "Route",
+                    "lead_time_days": "Advance days",
+                    "departure_date": "Departure date",
+                    "median_fare_inr": "Median fare (INR)",
+                    "average_fare_inr": "Average fare (INR)",
+                    "minimum_fare_inr": "Lowest fare (INR)",
+                    "maximum_fare_inr": "Highest fare (INR)",
+                    "observations": "Itineraries",
+                }
+            ),
+            width="stretch",
+            hide_index=True,
+        )
+else:
+    st.warning("No current Ignav collection batch is available for the fare outlook.")
+
+if not df_forecast.empty:
+    forecast_latest = df_forecast["date"].max().date()
+    st.success(
+        f"Live fare-basket forecast available through {forecast_latest:%d %b %Y}. "
+        f"Training observations: {int(df_forecast['training_observations'].iloc[-1])} daily snapshots."
+    )
     fig_fc = go.Figure()
     fig_fc.add_trace(
         go.Scatter(
-            x=recent_daily["date"],
-            y=recent_daily["apix_daily"],
-            mode="lines",
-            name="Historical modelled APIx",
+            x=df_live_history["snapshot_date"],
+            y=df_live_history["snapshot_index"],
+            mode="lines+markers",
+            name="Actual live fare basket",
             line=dict(color="#00d2ff", width=2),
         )
     )
     fig_fc.add_trace(
         go.Scatter(
             x=df_forecast["date"],
-            y=df_forecast["predicted_apix"],
+            y=df_forecast["predicted_live_fare_basket"],
             mode="lines+markers",
-            name="Model forecast",
+            name="30-day SARIMAX forecast",
             line=dict(color="#ffaa00", width=2.5, dash="dot"),
         )
     )
-    if {"lower_ci", "upper_ci"}.issubset(df_forecast.columns):
-        fig_fc.add_trace(
-            go.Scatter(
-                x=pd.concat([df_forecast["date"], df_forecast["date"][::-1]]),
-                y=pd.concat([df_forecast["upper_ci"], df_forecast["lower_ci"][::-1]]),
-                fill="toself",
-                fillcolor="rgba(255, 170, 0, 0.12)",
-                line=dict(color="rgba(255,255,255,0)"),
-                name="95% confidence interval",
-                hoverinfo="skip",
-            )
+    fig_fc.add_trace(
+        go.Scatter(
+            x=pd.concat([df_forecast["date"], df_forecast["date"][::-1]]),
+            y=pd.concat([df_forecast["upper_ci"], df_forecast["lower_ci"][::-1]]),
+            fill="toself",
+            fillcolor="rgba(255, 170, 0, 0.12)",
+            line=dict(color="rgba(255,255,255,0)"),
+            name="95% confidence interval",
+            hoverinfo="skip",
         )
+    )
     fig_fc.update_layout(
         template="plotly_dark",
         hovermode="x unified",
         xaxis_title="Date",
-        yaxis_title="Modelled index value",
-        margin=dict(l=20, r=20, t=30, b=20),
+        yaxis_title="Live fare-basket index (reference = 100)",
         legend=dict(orientation="h", y=1.12, x=0),
+        margin=dict(l=20, r=20, t=30, b=20),
     )
     st.plotly_chart(fig_fc, width="stretch")
+else:
+    available = int(
+        forecast_status.get(
+            "available_daily_observations",
+            df_live_history["snapshot_date"].nunique() if not df_live_history.empty else 0,
+        )
+    )
+    required = int(forecast_status.get("required_daily_observations", 60))
+    progress = min(available / max(required, 1), 1.0)
+    st.info(
+        f"The live-data SARIMAX forecast is active but waiting for sufficient history: "
+        f"{available}/{required} actual daily fare-basket observations. "
+        "No synthetic days are added. The current fare outlook above is already based on "
+        "verified API quotes."
+    )
+    st.progress(progress, text=f"Forecast training history: {available} of {required} daily snapshots")
+    if forecast_status.get("reason"):
+        st.caption(f"Forecast status: {forecast_status['reason']}")
+
 st.markdown("---")
 
 # -----------------------------------------------------------------------------
-# 4. Advance booking curves from provider fare observations
+# 4. Historical advance-booking curves from all retained providers
 # -----------------------------------------------------------------------------
-st.markdown("## 4. Advance Booking Price Curves — Verified Fare Observations")
+st.markdown("## 4. Historical Advance-Booking Curves by Provider")
 st.caption(
-    "Averages use only successful fare observations. Different providers are shown separately; "
-    "routes/windows without verified observations are not filled with synthetic prices."
+    "This longer-view chart includes retained successful observations from each provider. "
+    "Provider lines are shown separately; it is distinct from the latest-batch fare outlook above."
 )
 
 quotes_view = df_quotes.copy()
