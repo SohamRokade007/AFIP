@@ -68,7 +68,7 @@ def load_data():
         forecast["date"] = pd.to_datetime(forecast["date"], errors="coerce")
         forecast = forecast.dropna(subset=["date"]).sort_values("date")
 
-    # The current Ixigo scraper writes route codes and parsed_fare_inr.
+    # Provider-specific observations share the schema but remain separated by source_platform.
     # Do not substitute the older generated/synthetic quote file here.
     route_code_map = {
         "DEL-BOM": "DELHI-MUMBAI",
@@ -167,7 +167,7 @@ k1, k2, k3, k4 = st.columns(4)
 k1.metric("Latest modelled APIx", f"{latest_apix:.2f}", f"{pct_change:+.2f}% vs previous day")
 k2.metric("Latest MoSPI airfare CPI in file", f"{latest_mospi:.2f}" if pd.notna(latest_mospi) else "N/A")
 k3.metric("MoSPI inflation in file", f"{latest_inflation:.2f}%" if pd.notna(latest_inflation) else "N/A")
-k4.metric("Successful scraped observations", f"{len(df_quotes):,}")
+k4.metric("Verified fare observations", f"{len(df_quotes):,}")
 
 st.caption(
     f"Modelled APIx data coverage: {df_daily['date'].min():%d %b %Y} to "
@@ -297,7 +297,7 @@ if selected_sector != "All Corridors (National Composite)":
     quotes_view = quotes_view[quotes_view["sector"] == selected_sector]
 
 if quotes_view.empty:
-    st.info("There are no successful scraped observations for this route in the current dataset.")
+    st.info("There are no verified fare observations for this route in the current dataset.")
 else:
     lead_summary = (
         quotes_view.groupby(["source_platform", "sector", "lead_time_days"], as_index=False)
