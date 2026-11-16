@@ -1,32 +1,51 @@
+"""Run the complete local AFIP live-data pipeline.
+
+Requires IGNAV_API_KEY in the environment. This pipeline intentionally does not
+rerun the synthetic historical index generator.
+"""
+from __future__ import annotations
+
+import json
+import os
 import subprocess
-import time
 import sys
 from datetime import datetime
+from pathlib import Path
 
-def run_step(step_name, command):
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def run_step(step_name: str, command: list[str]) -> None:
     print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Starting: {step_name}...")
-    result = subprocess.run(command, shell=True)
-    if result.returncode != 0:
-        print(f"Error in {step_name}. Exiting.")
-        sys.exit(1)
+    subprocess.run(command, cwd=ROOT, check=True)
     print(f"Completed: {step_name} successfully.")
 
-def execute_daily_pipeline():
+
+def execute_daily_pipeline() -> None:
+    if not os.environ.get("IGNAV_API_KEY", "").strip():
+        raise RuntimeError("IGNAV_API_KEY is missing from the environment.")
+
     print("==================================================")
-    print(" AUTOMATED HIGH-FREQUENCY APIx PIPELINE INITIATED ")
+    print(" AFIP VERIFIED FARE → LIVE INDEX → FORECAST PIPELINE")
     print("==================================================")
-    
-    # 1. Run live scraper to ingest multi-horizon quotes
-    run_step("Live Scraper Engine", "python src/scraper.py")
 
-    # 2. Run index engine to recalculate APIx and back-test
-    run_step("Statistical Index Aggregator", "python src/index_engine.py")
+    run_step(
+        "Ignav verified airfare collection",
+        [sys.executable, "src/run_ignav_collection.py", "--market", "IN"],
+    )
 
-    # 3. Run predictive forecasting model
-    run_step("ARIMA Inflation Forecaster", "python src/forecaster.py")
+    summary_path = ROOT / "api_debug" / "collection_summary.json"
+    if not summary_path.exists():
+        raise RuntimeError("Collector summary was not created.")
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    if int(summary.get("verified_fares_written", 0)) <= 0:
+        raise RuntimeError("No new verified INR fare observations were collected.")
 
-    print("\nPipeline execution complete. Streamlit dashboard reflects updated series.")
+    run_step("Build daily live fare-basket history", [sys.executable, "src/build_live_index.py"])
+    run_step("Generate live-data 30-day forecast", [sys.executable, "src/forecaster.py"])
 
-if __name__ == '__main__':
-    # Can be scheduled via cron (e.g. daily at 00:00) or run as continuous daemon
+    print("\nAFIP live-data pipeline completed successfully.")
+
+
+if __name__ == "__main__":
     execute_daily_pipeline()
