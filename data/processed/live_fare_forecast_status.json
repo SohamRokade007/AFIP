@@ -1,0 +1,8 @@
+{
+  "status": "insufficient_history",
+  "model": "SARIMAX(1,1,1)x(1,0,0,7)",
+  "available_daily_observations": 2,
+  "required_daily_observations": 60,
+  "latest_observation_date": "2026-11-17",
+  "reason": "A weekly seasonal model is held back until at least 60 actual daily snapshots exist."
+}
